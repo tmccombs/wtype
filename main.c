@@ -9,6 +9,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <wayland-client-protocol.h>
 #include <wayland-client.h>
 #include <wchar.h>
 #include <xkbcommon/xkbcommon.h>
@@ -30,6 +31,7 @@ enum wtype_command_type {
 	WTYPE_COMMAND_BUTTON_PRESS = 7,
 	WTYPE_COMMAND_BUTTON_RELEASE = 8,
 	WTYPE_COMMAND_BUTTON_CLICK = 9,
+	WTYPE_COMMAND_AXIS = 10,
 };
 
 
@@ -53,7 +55,13 @@ enum wtype_btn {
 	WTYPE_BTN_EXTRA = 0x114,
 	WTYPE_BTN_FORWARD = 0x115,
 	WTYPE_BTN_BACK = 0x116,
-	WTYPE_BTN_TASK = 0x117
+	WTYPE_BTN_TASK = 0x117,
+};
+
+enum wtype_axis {
+	WTYPE_AXIS_NONE = 0,
+	WTYPE_AXIS_REL_WHEEL = 0x08,
+	WTYPE_AXIS_REL_HWHEEL = 0x06
 };
 
 
@@ -69,6 +77,11 @@ struct wtype_command {
 		enum wtype_mod mod;
 		uint32_t button;
 		unsigned int sleep_ms;
+		struct {
+			uint32_t axis;
+			wl_fixed_t value;
+		};
+
 	};
 };
 
@@ -172,6 +185,11 @@ static const struct { const char *name; uint32_t button; } button_names[] = {
 };
 
 
+static const struct { const char *name; uint32_t axis; } axis_names[] = {
+	{"axis_v", WTYPE_AXIS_REL_WHEEL},
+	{"axis_h", WTYPE_AXIS_REL_HWHEEL}
+};
+
 enum wtype_mod name_to_mod(const char *name)
 {
 	for (unsigned int i = 0; i < ARRAY_SIZE(mod_names); i++) {
@@ -195,6 +213,17 @@ uint32_t button_code_from_name(const char *name)
 	}
 	return WTYPE_BTN_NONE;
 }
+
+uint32_t axis_code_from_name(const char *name)
+{
+	for (unsigned int i = 0; i < ARRAY_SIZE(axis_names); i++) {
+		if (!strcasecmp(axis_names[i].name, name)) {
+			return axis_names[i].axis;
+		}
+	}
+	return WTYPE_AXIS_NONE;
+}
+
 
 
 static unsigned int append_keymap_entry(struct wtype *wtype, wchar_t ch, xkb_keysym_t xkb)
@@ -332,7 +361,19 @@ static void parse_args(struct wtype *wtype, int argc, const char *argv[])
 				if (cmd->button == WTYPE_BTN_NONE) {
 					fail("Unknown button '%s'", argv[i + 1]);
 				}
-			} else {
+			} else if (!strcmp("-A", argv[i])) {
+				cmd->type = WTYPE_COMMAND_AXIS;
+				cmd->axis = axis_code_from_name(argv[i + 1]);
+				if (cmd->axis == WTYPE_AXIS_NONE) {
+					fail("Unknown axis '%s'", argv[i + 1]);
+				}
+				if (i + 2 >= argc) {
+					fail("Usage -A <axis> <value>");
+				}
+				i++;
+				cmd->value = wl_fixed_from_double(atof(argv[i + 1]));
+			} 
+			else {
 				fail("Unknown parameter %s", argv[i]);
 			}
 			prefix_with_space = false;
@@ -480,6 +521,14 @@ static void run_text_stdin(struct wtype *wtype, struct wtype_command *cmd)
 	free(cmd->key_codes);
 }
 
+static void run_axis(struct wtype *wtype, struct wtype_command *cmd) {
+	zwlr_virtual_pointer_v1_axis(
+		wtype->pointer, 0, cmd->axis == WTYPE_AXIS_REL_WHEEL ? WL_POINTER_AXIS_VERTICAL_SCROLL : WL_POINTER_AXIS_HORIZONTAL_SCROLL,
+		cmd->value);
+	zwlr_virtual_pointer_v1_frame(wtype->pointer);
+	wl_display_roundtrip(wtype->display);
+}
+
 static void run_button(struct wtype *wtype, struct wtype_command *cmd) {
 	zwlr_virtual_pointer_v1_button(
 		wtype->pointer, 0, cmd->single_key_code,
@@ -488,6 +537,7 @@ static void run_button(struct wtype *wtype, struct wtype_command *cmd) {
 	zwlr_virtual_pointer_v1_frame(wtype->pointer);
 	wl_display_roundtrip(wtype->display);
 }
+
 static void run_click(struct wtype *wtype, struct wtype_command *cmd) {
 	zwlr_virtual_pointer_v1_button(
 		wtype->pointer, 0, cmd->single_key_code,
@@ -501,8 +551,8 @@ static void run_click(struct wtype *wtype, struct wtype_command *cmd) {
 	wl_display_roundtrip(wtype->display);
 	usleep(2000);
 }
-static void run_commands(struct wtype *wtype)
 
+static void run_commands(struct wtype *wtype)
 {
 	void (*handlers[])(struct wtype *, struct wtype_command *) = {
 		[WTYPE_COMMAND_SLEEP] = run_sleep,
@@ -515,6 +565,7 @@ static void run_commands(struct wtype *wtype)
 		[WTYPE_COMMAND_BUTTON_PRESS] = run_button,
 		[WTYPE_COMMAND_BUTTON_RELEASE] = run_button,
 		[WTYPE_COMMAND_BUTTON_CLICK] = run_click,
+		[WTYPE_COMMAND_AXIS] = run_axis
 	};
 	for (unsigned int i = 0; i < wtype->command_count; i++) {
 		handlers[wtype->commands[i].type](wtype, &wtype->commands[i]);

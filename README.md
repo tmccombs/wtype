@@ -50,3 +50,13 @@ virtual keyboard object. To help performing a more complicated sequence of key p
 # Hold the Right key for 1000ms
 wtype -P right -s 1000 -p right
 ```
+
+```
+# Scroll Verticaly
+wtype -A axis_v 75
+wtype -A axis_v -75
+
+# Scroll Horizontaly
+wtype -A axis_h 75
+wtype -A axis_h -75
+```
