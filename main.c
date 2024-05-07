@@ -522,9 +522,9 @@ static void run_text_stdin(struct wtype *wtype, struct wtype_command *cmd)
 }
 
 static void run_axis(struct wtype *wtype, struct wtype_command *cmd) {
-	zwlr_virtual_pointer_v1_axis(
+	zwlr_virtual_pointer_v1_axis_discrete(
 		wtype->pointer, 0, cmd->axis == WTYPE_AXIS_REL_WHEEL ? WL_POINTER_AXIS_VERTICAL_SCROLL : WL_POINTER_AXIS_HORIZONTAL_SCROLL,
-		cmd->value);
+		cmd->value, cmd->value >= 0 ? 1 : -1);
 	zwlr_virtual_pointer_v1_frame(wtype->pointer);
 	wl_display_roundtrip(wtype->display);
 }
